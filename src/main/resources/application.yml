@@ -1,0 +1,24 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: spring-ai-agent-lab
+  jackson:
+    default-property-inclusion: non_null
+
+agent:
+  llm:
+    provider: deepseek
+    base-url: https://api.deepseek.com
+    api-key: ${DEEPSEEK_API_KEY:}
+    model: deepseek-chat
+    timeout: 30s
+  loop:
+    max-steps: 6
+  memory:
+    max-messages: 20
+
+logging:
+  level:
+    io.github.yuchencd.agentlab: INFO
