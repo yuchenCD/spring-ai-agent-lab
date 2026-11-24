@@ -11,13 +11,25 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.UUID;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Calls any OpenAI-compatible {@code /chat/completions} endpoint (DeepSeek by default).
  *
  * <p>Uses the JDK {@link HttpClient} directly instead of an SDK so the wire format
- * is visible and testable — see {@code docs/adr/0001-raw-http-client.md}.</p>
+ * is visible and testable — see {@code docs/adr/0001-raw-http-client-over-framework.md}.</p>
+ *
+ * <p>Streaming follows the OpenAI SSE dialect: {@code data: {...}} lines carrying
+ * {@code choices[0].delta}, terminated by {@code data: [DONE]}. Text deltas are
+ * forwarded immediately; tool-call deltas are assembled by {@code index} because
+ * providers split function names and arguments across chunks.</p>
  */
 public class OpenAiCompatibleLlmClient implements LlmClient {
 
@@ -40,9 +52,36 @@ public class OpenAiCompatibleLlmClient implements LlmClient {
 
   @Override
   public Llm.Completion complete(List<Llm.Message> messages, List<Llm.ToolSpec> tools) {
+    HttpResponse<String> response = send(buildRequest(messages, tools, false), HttpResponse.BodyHandlers.ofString());
+    if (response.statusCode() / 100 != 2) {
+      throw httpError(response.statusCode(), response.body());
+    }
+    return parse(response.body());
+  }
+
+  @Override
+  public Llm.Completion stream(
+      List<Llm.Message> messages,
+      List<Llm.ToolSpec> tools,
+      Consumer<String> onToken) {
+    HttpResponse<Stream<String>> response = send(buildRequest(messages, tools, true), HttpResponse.BodyHandlers.ofLines());
+    if (response.statusCode() / 100 != 2) {
+      String body;
+      try (Stream<String> lines = response.body()) {
+        body = lines.collect(Collectors.joining("\n"));
+      }
+      throw httpError(response.statusCode(), body);
+    }
+    return parseStream(response.body(), onToken);
+  }
+
+  private HttpRequest buildRequest(List<Llm.Message> messages, List<Llm.ToolSpec> tools, boolean stream) {
     ObjectNode body = objectMapper.createObjectNode();
     body.put("model", config.model());
     body.put("temperature", 0);
+    if (stream) {
+      body.put("stream", true);
+    }
 
     ArrayNode messageArray = body.putArray("messages");
     messages.forEach(message -> messageArray.add(toJson(message)));
@@ -59,27 +98,24 @@ public class OpenAiCompatibleLlmClient implements LlmClient {
       }
     }
 
-    HttpRequest request = HttpRequest.newBuilder(endpoint)
+    return HttpRequest.newBuilder(endpoint)
         .timeout(config.timeout())
         .header("Content-Type", "application/json")
+        .header("Accept", stream ? "text/event-stream" : "application/json")
         .header("Authorization", "Bearer " + config.apiKey())
         .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
         .build();
+  }
 
-    HttpResponse<String> response;
+  private <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> handler) {
     try {
-      response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+      return httpClient.send(request, handler);
     } catch (IOException exception) {
       throw new LlmException("调用 LLM 失败：" + exception.getMessage(), exception);
     } catch (InterruptedException exception) {
       Thread.currentThread().interrupt();
       throw new LlmException("调用 LLM 被中断", exception);
     }
-
-    if (response.statusCode() / 100 != 2) {
-      throw new LlmException("LLM 返回 HTTP " + response.statusCode() + "：" + snippet(response.body()));
-    }
-    return parse(response.body());
   }
 
   private ObjectNode toJson(Llm.Message message) {
@@ -129,11 +165,80 @@ public class OpenAiCompatibleLlmClient implements LlmClient {
     }
   }
 
+  private Llm.Completion parseStream(Stream<String> lines, Consumer<String> onToken) {
+    StringBuilder text = new StringBuilder();
+    Map<Integer, ToolCallBuilder> toolCalls = new TreeMap<>();
+    try (lines) {
+      Iterator<String> iterator = lines.iterator();
+      while (iterator.hasNext()) {
+        String line = iterator.next().trim();
+        if (line.isEmpty() || !line.startsWith("data:")) {
+          continue;
+        }
+        String payload = line.substring("data:".length()).trim();
+        if ("[DONE]".equals(payload)) {
+          break;
+        }
+        JsonNode chunk = objectMapper.readTree(payload);
+        JsonNode delta = chunk.path("choices").path(0).path("delta");
+        JsonNode content = delta.path("content");
+        if (!content.isMissingNode() && !content.isNull()) {
+          String piece = content.asText();
+          if (!piece.isEmpty()) {
+            text.append(piece);
+            onToken.accept(piece);
+          }
+        }
+        for (JsonNode callNode : delta.path("tool_calls")) {
+          int index = callNode.path("index").asInt(0);
+          ToolCallBuilder builder = toolCalls.computeIfAbsent(index, key -> new ToolCallBuilder());
+          JsonNode id = callNode.path("id");
+          if (!id.isMissingNode() && !id.isNull() && !id.asText().isBlank()) {
+            builder.id = id.asText();
+          }
+          JsonNode function = callNode.path("function");
+          JsonNode name = function.path("name");
+          if (!name.isMissingNode() && !name.isNull() && !name.asText().isBlank()) {
+            builder.name = name.asText();
+          }
+          JsonNode arguments = function.path("arguments");
+          if (!arguments.isMissingNode() && !arguments.isNull()) {
+            builder.arguments.append(arguments.asText());
+          }
+        }
+      }
+    } catch (IOException exception) {
+      throw new LlmException("读取 LLM 流失败：" + exception.getMessage(), exception);
+    }
+
+    List<Llm.ToolCall> calls = toolCalls.values().stream()
+        .filter(builder -> builder.name != null && !builder.name.isBlank())
+        .map(builder -> new Llm.ToolCall(
+            builder.id == null || builder.id.isBlank() ? "call_" + UUID.randomUUID() : builder.id,
+            builder.name,
+            builder.arguments.isEmpty() ? "{}" : builder.arguments.toString()))
+        .toList();
+    String content = text.isEmpty() ? null : text.toString();
+    return new Llm.Completion(content, calls);
+  }
+
+  private static LlmException httpError(int status, String body) {
+    return new LlmException("LLM 返回 HTTP " + status + "：" + snippet(body));
+  }
+
   private static String stripTrailingSlash(String url) {
     return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
   }
 
   private static String snippet(String text) {
     return text.length() <= 500 ? text : text.substring(0, 500) + "...";
+  }
+
+  /** Accumulates streamed tool-call fragments for one {@code choices[0].delta.tool_calls[]} index. */
+  private static final class ToolCallBuilder {
+
+    private String id;
+    private String name;
+    private final StringBuilder arguments = new StringBuilder();
   }
 }
