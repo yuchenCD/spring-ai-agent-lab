@@ -12,8 +12,15 @@ services:
       # 可选：接真实 embedding 服务（为空时用离线 hashing embedding）
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-https://api.openai.com/v1}
+      # 向量库：in-memory（默认）或 pgvector
+      AGENT_RAG_STORE: ${AGENT_RAG_STORE:-in-memory}
+      PGVECTOR_URL: jdbc:postgresql://pgvector:5432/agentlab
+      PGVECTOR_USER: agentlab
+      PGVECTOR_PASSWORD: agentlab
     depends_on:
       redis:
+        condition: service_healthy
+      pgvector:
         condition: service_healthy
     restart: unless-stopped
 
@@ -27,3 +34,23 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+
+  # 只有当 AGENT_RAG_STORE=pgvector 时才被应用使用
+  pgvector:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: agentlab
+      POSTGRES_USER: agentlab
+      POSTGRES_PASSWORD: agentlab
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgvector-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentlab -d agentlab"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgvector-data:
