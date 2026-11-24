@@ -6,6 +6,7 @@ import io.github.yuchencd.agentlab.memory.ChatMemory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Consumer;
 import org.springframework.stereotype.Service;
 
 /**
@@ -34,7 +35,26 @@ public class AgentService {
     this.agentLoop = agentLoop;
   }
 
+  /** Runs a turn without streaming answer tokens. */
   public ChatResult chat(String conversationId, String userMessage, AgentLoop.StepListener listener) {
+    return chat(conversationId, userMessage, token -> {
+    }, listener);
+  }
+
+  /**
+   * Runs a turn, forwarding streamed answer text through {@code onToken}.
+   *
+   * @param conversationId existing conversation id, or {@code null}/blank for a new one
+   * @param userMessage    the user's message
+   * @param onToken        receives streamed answer text as it is generated
+   * @param listener       receives one event per executed tool call
+   * @return the completed turn
+   */
+  public ChatResult chat(
+      String conversationId,
+      String userMessage,
+      Consumer<String> onToken,
+      AgentLoop.StepListener listener) {
     String id = conversationId == null || conversationId.isBlank()
         ? UUID.randomUUID().toString()
         : conversationId;
@@ -44,7 +64,7 @@ public class AgentService {
     conversation.addAll(memory.get(id));
     conversation.add(Llm.Message.user(userMessage));
 
-    AgentLoop.AgentRun run = agentLoop.run(conversation, listener);
+    AgentLoop.AgentRun run = agentLoop.run(conversation, onToken, listener);
     memory.append(id, Llm.Message.user(userMessage), Llm.Message.assistant(run.reply()));
 
     return new ChatResult(id, run.reply(), run.steps(), run.stepLimitReached(), llmClient.providerName());

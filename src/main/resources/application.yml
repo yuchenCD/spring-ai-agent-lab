@@ -14,8 +14,14 @@ agent:
     api-key: ${DEEPSEEK_API_KEY:}
     model: deepseek-chat
     timeout: 30s
+    # 429/5xx 与连接失败的自动重试次数（含首次）；退避 300ms 起指数增长
+    max-attempts: 3
+    retry-backoff: 300ms
   loop:
     max-steps: 6
+    # 同一轮内并行工具调用的批处理截止时间
+    tool-timeout: 10s
+    parallel-tools: true
   memory:
     max-messages: 20
 

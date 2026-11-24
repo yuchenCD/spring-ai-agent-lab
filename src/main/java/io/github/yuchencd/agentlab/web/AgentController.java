@@ -8,6 +8,7 @@ import jakarta.validation.Valid;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.List;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.task.TaskExecutor;
@@ -20,13 +21,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-/** HTTP surface: one blocking chat endpoint, one SSE step stream, and a tool catalog. */
+/** HTTP surface: one blocking chat endpoint, one SSE stream, and a tool catalog. */
 @RestController
 @RequestMapping("/api/v1")
 public class AgentController {
 
   private static final Logger log = LoggerFactory.getLogger(AgentController.class);
-  private static final long SSE_TIMEOUT_MS = 120_000L;
+  private static final long SSE_TIMEOUT_MS = 180_000L;
 
   private final AgentService agentService;
   private final ToolRegistry toolRegistry;
@@ -46,8 +47,13 @@ public class AgentController {
   }
 
   /**
-   * Streaming turn: emits one {@code step} event per executed tool call, then a
-   * {@code done} event with the final reply, or an {@code error} event.
+   * Streaming turn. Events:
+   * <ul>
+   *   <li>{@code token} — a slice of answer text ({"text": "..."})</li>
+   *   <li>{@code step} — one executed tool call</li>
+   *   <li>{@code done} — the complete {@link ChatResponse}</li>
+   *   <li>{@code error} — an {@code ApiError}</li>
+   * </ul>
    */
   @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
   public SseEmitter chatStream(@Valid @RequestBody ChatRequest request) {
@@ -57,6 +63,7 @@ public class AgentController {
         AgentService.ChatResult result = agentService.chat(
             request.conversationId(),
             request.message(),
+            token -> sendSafely(emitter, "token", Map.of("text", token)),
             step -> sendSafely(emitter, "step", ChatResponse.ToolStep.from(step)));
         sendSafely(emitter, "done", ChatResponse.from(result));
         emitter.complete();
