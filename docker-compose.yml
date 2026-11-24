@@ -6,4 +6,24 @@ services:
       - "8080:8080"
     environment:
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      # 会话记忆切到 Redis：改成 redis 即可
+      AGENT_MEMORY_TYPE: ${AGENT_MEMORY_TYPE:-in-memory}
+      SPRING_DATA_REDIS_HOST: redis
+      # 可选：接真实 embedding 服务（为空时用离线 hashing embedding）
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-https://api.openai.com/v1}
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
