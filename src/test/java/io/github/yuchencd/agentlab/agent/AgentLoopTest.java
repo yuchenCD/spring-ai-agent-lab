@@ -21,7 +21,9 @@ class AgentLoopTest {
   private static final AgentProperties PROPERTIES = new AgentProperties(
       new AgentProperties.Llm("mock", "http://localhost", "", "test-model", Duration.ofSeconds(5), 3, Duration.ofMillis(10)),
       new AgentProperties.Loop(3, Duration.ofSeconds(2), true),
-      new AgentProperties.Memory(10));
+      new AgentProperties.Memory(10, "in-memory", Duration.ofHours(24)),
+      new AgentProperties.Embedding("", "", "", 256),
+      new AgentProperties.Rag(500, 80, 4));
 
   private final ToolRegistry registry = new ToolRegistry(List.of(new CalculatorTool()));
 
@@ -114,7 +116,9 @@ class AgentLoopTest {
     AgentProperties shortTimeout = new AgentProperties(
         PROPERTIES.llm(),
         new AgentProperties.Loop(3, Duration.ofMillis(100), true),
-        PROPERTIES.memory());
+        PROPERTIES.memory(),
+        PROPERTIES.embedding(),
+        PROPERTIES.rag());
     ToolRegistry slowRegistry = new ToolRegistry(List.of(
         new SleepTool("sleep-a", 500), new SleepTool("sleep-b", 500)));
     ScriptedLlmClient llm = new ScriptedLlmClient(
