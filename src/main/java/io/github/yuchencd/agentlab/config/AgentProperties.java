@@ -10,7 +10,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * {@code application.yml} for defaults.</p>
  */
 @ConfigurationProperties(prefix = "agent")
-public record AgentProperties(Llm llm, Loop loop, Memory memory) {
+public record AgentProperties(Llm llm, Loop loop, Memory memory, Embedding embedding, Rag rag) {
 
   /** LLM provider configuration (OpenAI-compatible chat completions endpoint). */
   public record Llm(
@@ -27,7 +27,23 @@ public record AgentProperties(Llm llm, Loop loop, Memory memory) {
   public record Loop(int maxSteps, Duration toolTimeout, boolean parallelTools) {
   }
 
-  /** Conversation memory limits. */
-  public record Memory(int maxMessages) {
+  /**
+   * Conversation memory.
+   *
+   * @param type {@code in-memory} (default) or {@code redis}
+   * @param ttl  Redis key lifetime; ignored by the in-memory store
+   */
+  public record Memory(int maxMessages, String type, Duration ttl) {
+  }
+
+  /**
+   * Embedding provider for retrieval. An empty api-key falls back to the
+   * offline deterministic hashing embedder.
+   */
+  public record Embedding(String baseUrl, String apiKey, String model, int dimensions) {
+  }
+
+  /** Retrieval settings for the knowledge base. */
+  public record Rag(int chunkSize, int chunkOverlap, int topK) {
   }
 }

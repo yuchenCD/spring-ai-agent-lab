@@ -7,10 +7,8 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import org.springframework.stereotype.Component;
 
 /** Process-local conversation memory bounded per conversation. */
-@Component
 public class InMemoryChatMemory implements ChatMemory {
 
   private final Map<String, Deque<Llm.Message>> conversations = new ConcurrentHashMap<>();

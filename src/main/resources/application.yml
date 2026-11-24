@@ -6,6 +6,10 @@ spring:
     name: spring-ai-agent-lab
   jackson:
     default-property-inclusion: non_null
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
 
 agent:
   llm:
@@ -24,6 +28,19 @@ agent:
     parallel-tools: true
   memory:
     max-messages: 20
+    # in-memory（默认，零依赖）或 redis（配合 docker compose 的 redis 服务）
+    type: in-memory
+    ttl: 24h
+  embedding:
+    # 任何 OpenAI 兼容 /embeddings 端点；api-key 为空时自动使用离线 hashing embedding
+    base-url: ${EMBEDDING_BASE_URL:https://api.openai.com/v1}
+    api-key: ${EMBEDDING_API_KEY:}
+    model: ${EMBEDDING_MODEL:text-embedding-3-small}
+    dimensions: 256
+  rag:
+    chunk-size: 500
+    chunk-overlap: 80
+    top-k: 4
 
 logging:
   level:
