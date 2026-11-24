@@ -13,11 +13,18 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record AgentProperties(Llm llm, Loop loop, Memory memory) {
 
   /** LLM provider configuration (OpenAI-compatible chat completions endpoint). */
-  public record Llm(String provider, String baseUrl, String apiKey, String model, Duration timeout) {
+  public record Llm(
+      String provider,
+      String baseUrl,
+      String apiKey,
+      String model,
+      Duration timeout,
+      int maxAttempts,
+      Duration retryBackoff) {
   }
 
-  /** Agent loop limits. */
-  public record Loop(int maxSteps) {
+  /** Agent loop limits and tool execution strategy. */
+  public record Loop(int maxSteps, Duration toolTimeout, boolean parallelTools) {
   }
 
   /** Conversation memory limits. */
