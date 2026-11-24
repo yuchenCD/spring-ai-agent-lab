@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -79,19 +80,67 @@ class OpenAiCompatibleLlmClientTest {
     assertThat(client("http://localhost:1").providerName()).isEqualTo("deepseek");
   }
 
+  @Test
+  void streamsTextDeltas() {
+    String baseUrl = startStreamServer(List.of(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"你\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"好\"}}]}\n\n",
+        "data: [DONE]\n\n"));
+    LlmClient client = client(baseUrl);
+    List<String> tokens = new ArrayList<>();
+
+    Llm.Completion completion = client.stream(List.of(Llm.Message.user("hi")), List.of(), tokens::add);
+
+    assertThat(tokens).containsExactly("你", "好");
+    assertThat(completion.content()).isEqualTo("你好");
+    assertThat(completion.hasToolCalls()).isFalse();
+    assertThat(lastRequestBody).contains("\"stream\":true");
+  }
+
+  @Test
+  void assemblesToolCallsSplitAcrossStreamChunks() {
+    String baseUrl = startStreamServer(List.of(
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\","
+            + "\"type\":\"function\",\"function\":{\"name\":\"calculator\",\"arguments\":\"\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,"
+            + "\"function\":{\"arguments\":\"{\\\"expression\\\":\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,"
+            + "\"function\":{\"arguments\":\"\\\"1+2\\\"}\"}}]}}]}\n\n",
+        "data: [DONE]\n\n"));
+    LlmClient client = client(baseUrl);
+    List<String> tokens = new ArrayList<>();
+
+    Llm.Completion completion = client.stream(List.of(Llm.Message.user("1+2")), List.of(), tokens::add);
+
+    assertThat(tokens).isEmpty();
+    assertThat(completion.hasToolCalls()).isTrue();
+    assertThat(completion.toolCalls()).hasSize(1);
+    assertThat(completion.toolCalls().get(0).id()).isEqualTo("call_1");
+    assertThat(completion.toolCalls().get(0).name()).isEqualTo("calculator");
+    assertThat(completion.toolCalls().get(0).arguments()).isEqualTo("{\"expression\":\"1+2\"}");
+  }
+
+  @Test
+  void raisesOnStreamHttpError() {
+    String baseUrl = startServer(500, "{\"error\":\"upstream down\"}");
+    LlmClient client = client(baseUrl);
+
+    assertThatThrownBy(() -> client.stream(List.of(Llm.Message.user("hi")), List.of(), token -> {
+    }))
+        .isInstanceOf(LlmException.class)
+        .hasMessageContaining("HTTP 500");
+  }
+
   private LlmClient client(String baseUrl) {
     AgentProperties.Llm config = new AgentProperties.Llm(
-        "deepseek", baseUrl, "test-key", "deepseek-chat", Duration.ofSeconds(5));
+        "deepseek", baseUrl, "test-key", "deepseek-chat",
+        Duration.ofSeconds(5), 3, Duration.ofMillis(10));
     return new OpenAiCompatibleLlmClient(config, new ObjectMapper());
   }
 
   private String startServer(int status, String responseBody) {
-    try {
-      server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-    } catch (IOException exception) {
-      throw new IllegalStateException("cannot start test HTTP server", exception);
-    }
-    server.createContext("/chat/completions", exchange -> {
+    HttpServer httpServer = newServer();
+    httpServer.createContext("/chat/completions", exchange -> {
       lastRequestBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
       lastAuthorizationHeader = exchange.getRequestHeaders().getFirst("Authorization");
       byte[] payload = responseBody.getBytes(StandardCharsets.UTF_8);
@@ -101,7 +150,35 @@ class OpenAiCompatibleLlmClientTest {
         output.write(payload);
       }
     });
-    server.start();
-    return "http://127.0.0.1:" + server.getAddress().getPort();
+    httpServer.start();
+    server = httpServer;
+    return "http://127.0.0.1:" + httpServer.getAddress().getPort();
+  }
+
+  private String startStreamServer(List<String> chunks) {
+    HttpServer httpServer = newServer();
+    httpServer.createContext("/chat/completions", exchange -> {
+      lastRequestBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+      lastAuthorizationHeader = exchange.getRequestHeaders().getFirst("Authorization");
+      exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
+      exchange.sendResponseHeaders(200, 0);
+      try (var output = exchange.getResponseBody()) {
+        for (String chunk : chunks) {
+          output.write(chunk.getBytes(StandardCharsets.UTF_8));
+          output.flush();
+        }
+      }
+    });
+    httpServer.start();
+    server = httpServer;
+    return "http://127.0.0.1:" + httpServer.getAddress().getPort();
+  }
+
+  private static HttpServer newServer() {
+    try {
+      return HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    } catch (IOException exception) {
+      throw new IllegalStateException("cannot start test HTTP server", exception);
+    }
   }
 }
