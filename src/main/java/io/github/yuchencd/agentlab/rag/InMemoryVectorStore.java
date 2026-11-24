@@ -5,7 +5,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import org.springframework.stereotype.Component;
 
 /**
  * Cosine-similarity vector store held in process memory.
@@ -14,7 +13,6 @@ import org.springframework.stereotype.Component;
  * a persistent store (pgvector, Qdrant, …) when the corpus or deployment shape
  * demands it.</p>
  */
-@Component
 public class InMemoryVectorStore implements VectorStore {
 
   private final Map<String, Entry> entries = new ConcurrentHashMap<>();
