@@ -38,9 +38,20 @@ agent:
     model: ${EMBEDDING_MODEL:text-embedding-3-small}
     dimensions: 256
   rag:
+    # in-memory（默认，零依赖）或 pgvector（需要 PostgreSQL + pgvector 扩展）
+    store: ${AGENT_RAG_STORE:in-memory}
     chunk-size: 500
     chunk-overlap: 80
     top-k: 4
+  pgvector:
+    url: ${PGVECTOR_URL:jdbc:postgresql://localhost:5432/agentlab}
+    username: ${PGVECTOR_USER:agentlab}
+    password: ${PGVECTOR_PASSWORD:agentlab}
+    # 必须与 embedding 维度一致：离线 hashing 默认 256
+    dimensions: ${PGVECTOR_DIMENSIONS:256}
+  mcp:
+    # 每个 server 会以子进程方式启动，工具注册为 mcp__<name>__<tool>
+    servers: []
 
 logging:
   level:
