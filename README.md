@@ -1,6 +1,6 @@
 # spring-ai-agent-lab
 
-[![CI](https://github.com/yuchenCD/spring-ai-agent-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/yuchenCD/spring-ai-agent-lab/actions/workflows/ci.yml)
+[![CI](https://github.com/yuchencd93/spring-ai-agent-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/yuchencd93/spring-ai-agent-lab/actions/workflows/ci.yml)
 [![Java](https://img.shields.io/badge/Java-21-orange?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-6db33f?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -58,7 +58,7 @@ src/main/java/io/github/yuchencd/agentlab
 要求：JDK 21、Maven 3.9+。可选：DeepSeek API Key（不配置则进入离线 Mock 模式）。
 
 ```bash
-git clone https://github.com/yuchenCD/spring-ai-agent-lab.git
+git clone https://github.com/yuchencd93/spring-ai-agent-lab.git
 cd spring-ai-agent-lab
 
 # 离线 Mock 模式：无需任何 Key 即可体验工具调用与流式事件
